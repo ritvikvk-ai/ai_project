@@ -31,5 +31,5 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - CLEARML_API_ACCESS_KEY="OPDPAOBL8C8EFD6LHM0L72BSLI59FS"
-      - CLEARML_API_SECRET_KEY="KvqSMf4BXpz9sAFmP6lzjE8a23lQuxSD-GkDrIXB0Vh2TjZ9Yuj2wan2_9whI4dgC8U"
+      - CLEARML_API_ACCESS_KEY="enter_your_access_key_here"
+      - CLEARML_API_SECRET_KEY="enter_your_secret_key_here"

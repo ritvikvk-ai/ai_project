@@ -1,9 +1,9 @@
-# Repository for RAG Project
+# Finetuning a RAG System
 
 Project completed by:
 
-1. Ansh Harjai (ah7163)
-2. Ritvik Vasantha Kumar (rv2459)
+1. Ritvik Vasantha Kumar (rv2459)
+2. Ansh Harjai (ah7163)
 
 This repository contains all the necessary files to run the Retrieval-Augmented Generation (RAG) project.
 
