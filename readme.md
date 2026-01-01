@@ -1,106 +1,72 @@
-# Finetuning a RAG System
+# Finetuning ROS2 RAG Assistant
 
-Project completed by:
+Retrieval-augmented generation (RAG) system built for ROS2, Nav2, MoveIt2, and Gazebo questions. The stack extracts content from the ROS 2 docs repo, stores it in MongoDB, generates spaCy embeddings, indexes them in Qdrant, and routes user queries to Llama-3-70B on Together via a Gradio interface. A fine-tuned Llama-3-8B variant trained on `data.json` is also published on Hugging Face: https://huggingface.co/Data-harjai/ai_project_fine_tuned_llama.
 
-1. Ritvik Vasantha Kumar (rv2459)
-2. Ansh Harjai (ah7163)
+Project by Ritvik Vasantha Kumar (rv2459) and Ansh Harjai (ah7163).
 
-This repository contains all the necessary files to run the Retrieval-Augmented Generation (RAG) project.
+## What this solves
+- Pulls authoritative ROS 2 docs and code snippets into a searchable knowledge base.
+- Lets robotics engineers ask natural-language questions and get answers grounded in retrieved source material.
+- Reduces model hallucinations by pairing dense retrieval (Qdrant) with a strong generator (Llama 3).
 
-## Project Overview
+## How it works
+- **ETL** (`app/etl_pipeline.py`): Clones https://github.com/ros2/ros2_documentation, strips markup, and writes Markdown/reST/text plus code files into MongoDB (`RAG_DB.raw_data`) with metadata (file name, repo, URL). Logged via ClearML.
+- **Featurization** (`app/featurization_pipeline.py`): Chunks each document into ~200-word windows, embeds with `en_core_web_lg` (300-dim), and upserts into Qdrant collection `rag_vectors` with payload containing the chunk text and file metadata.
+- **Retrieval** (`app/retrieve_from_qdrant.py`): Converts a user query to a spaCy embedding and returns the top 5 matching chunks from Qdrant.
+- **Generation** (`app/llm_connection.py`): Builds a system/user prompt and calls `meta-llama/Llama-3-70b-chat-hf` on Together. Responses are shown in a Gradio UI (`app/app.py`). The dropdown option “Initialize Database” runs the ETL and featurization pipelines before answering questions.
+- **Fine-tuning**: `data.json` plus `fine-tune.ipynb` show how Llama-3-8B-Instruct was fine-tuned; inference for that model is available via Hugging Face (link above).
 
-In this project, we fine-tuned the **Llama-3-8b-instruct** model on **Google Colab** using a custom dataset stored in `data.json`. The fine-tuned model was saved to **Hugging Face** for potential use (link for the fine-tuned model: https://huggingface.co/Data-harjai/ai_project_fine_tuned_llama). However, due to performance constraints when running the fine-tuned model locally, we implemented the RAG pipeline using the **Llama-3-70b-chat-hf** model, hosted online on **Together.ai**.
+## Why these choices
+- **ROS 2 docs as the corpus**: High-quality, domain-authoritative material for Nav2/MoveIt2/Gazebo questions; keeps answers aligned with upstream guidance.
+- **MongoDB for raw storage**: Handles mixed file types (text + code) with flexible schemas; easy upserts during repeated ETL runs.
+- **spaCy `en_core_web_lg` embeddings**: Fast, CPU-friendly 300-d vectors that avoid GPU dependency for indexing; good enough semantic fidelity for docs-style queries.
+- **Qdrant for vector search**: Lightweight, self-hosted ANN store with payload filtering and simple Docker deployment; matches the project’s need for ~hundreds of thousands of chunks.
+- **Llama-3-70B on Together**: Offloads heavy inference to a hosted model for higher answer quality than the locally fine-tuned 8B while keeping local hardware requirements modest.
+- **Gradio UI**: Minimal code to expose chat plus an “Initialize Database” control for end-to-end demos.
+- **ClearML tracking**: Optional experiment/run logging to keep ETL/featurization reproducible and observable.
+- **Fine-tuned 8B checkpoint**: Provides a smaller, cheaper fallback model trained on `data.json`; useful for offline/Ollama-style deployments when Together is unavailable.
 
-A video demonstration of the **Gradio** app has been uploaded to this repository, showcasing the interactions with the Large Language Model (LLM), where messages and contextual information are sent, and the model responds accordingly.
+## Repository layout
+- `app/app.py` – Gradio chat UI and orchestration hook for ETL, featurization, retrieval, and LLM calls.
+- `app/etl_pipeline.py` – GitHub clone/clean/load into MongoDB with ClearML tracking.
+- `app/featurization_pipeline.py` – spaCy embedding generation and Qdrant upload.
+- `app/retrieve_from_qdrant.py` – Query embedding + nearest-neighbor search in Qdrant.
+- `app/llm_connection.py` – Together API call (set your API key in `together_ai_api`).
+- `app/Dockerfile`, `docker-compose.yml` – Containerization and service wiring for the app, MongoDB, Qdrant, and ClearML.
+- `data.json` – Supervised QA data used for fine-tuning.
+- `Embedding_demo.ipynb`, `Extraction_demo.ipynb`, `llm_connection.ipynb`, `Demo_LLM.mov`, `Screenshots/` – Demos and assets showing the workflow end to end.
 
----
+## Prerequisites
+- Docker and Docker Compose (or Python 3.9+ if running locally).
+- Together API key (set `together_ai_api` in `app/llm_connection.py` before building/running).
+- ClearML credentials if you want experiment tracking (`CLEARML_API_ACCESS_KEY`, `CLEARML_API_SECRET_KEY`, `CLEARML_API_HOST`).
+- Ports available: MongoDB 27017, Qdrant 6333, Gradio 7860.
+- If running without Docker, install dependencies from `app/requirements.txt` and download the spaCy model: `python -m spacy download en_core_web_lg`.
 
-## Workflow
+## Quickstart (Docker)
+1. Add your Together API key to `app/llm_connection.py` (`together_ai_api = "..."`). Optional: fill ClearML keys in `clearmmll.txt` or pass them as env vars at run time.
+2. Build the app image (includes the spaCy model): `docker build -f app/Dockerfile -t ros2-rag-app ./app`.
+3. Create a network and start dependencies:
+   - `docker network create my_network`
+   - `docker run -d --name mongodb --network my_network -p 27017:27017 mongo:5.0`
+   - `docker run -d --name qdrant --network my_network -p 6333:6333 qdrant/qdrant:v1.3.0`
+4. Run the app container on the same network:  
+   `docker run --rm --name rag-app --network my_network -p 7860:7860 ros2-rag-app`
+5. Open http://localhost:7860, choose “Initialize Database” to run ETL + featurization, then ask questions or use the sample prompts.
 
-### 1. **Data Extraction**
+> Note: The included `docker-compose.yml` starts the same services; update the app service port mapping to `7860:7860` if you prefer Compose.
 
-- The source data is extracted from the [ROS 2 Documentation GitHub Repository](https://github.com/ros2/ros2_documentation).
-- The repository's text files are cleaned and stored in **MongoDB**.
-- Coding files are also stored in MongoDB _without any preprocessing_. All other non-text files in the repository are ignored.
+## Local development (without Docker)
+1. `cd app && python -m venv .venv && source .venv/bin/activate`
+2. `pip install -r requirements.txt && python -m spacy download en_core_web_lg`
+3. Set `together_ai_api` in `llm_connection.py`, ensure MongoDB and Qdrant are running locally (default ports), then start the app: `python app.py`.
 
-### 2. **Storing Data in MongoDB**
+## Using the notebooks and assets
+- `fine-tune.ipynb` – Colab-ready notebook to train Llama-3-8B-Instruct on `data.json` and push to Hugging Face.
+- `Embedding_demo.ipynb`, `Extraction_demo.ipynb`, `llm_connection.ipynb` – Individual steps of the pipeline for debugging or teaching.
+- `Demo_LLM.mov` and `Screenshots/` – UI walk-through of the Gradio chat flow.
 
-- Each file is saved in MongoDB along with metadata such as:
-  - `file_name`
-  - `url`
-  - `repo_name`
-
-### 3. **Chunking and Embedding Creation**
-
-- The extracted data is divided into smaller chunks.
-- Each chunk is converted into a 300-dimensional embedding vector.
-- These embeddings, along with their associated payloads, are stored in the **Qdrant Vector Database**.
-
-### 4. **Query Processing**
-
-- When a user submits a query, the following steps are performed:
-  1. Retrieve the 5 most similar embeddings from Qdrant based on the query.
-  2. Create a prompt consisting of:
-     - A **system message**
-     - The **user query**
-     - The **retrieved context** from Qdrant.
-
-### 5. **Generating a Response**
-
-- The constructed prompt is sent to the LLM.
-- The LLM processes the prompt and generates a response.
-- The response is displayed to the user via the **Gradio** interface.
-
----
-
-## Files in the Repository
-
-1. **`data.json`**  
-   Contains the custom dataset used for fine-tuning the model.
-
-2. **`fine_tuning_notebook.ipynb`**  
-   The Python notebook used for fine-tuning the **Llama-3-8b-instruct** model.
-
-3. **`fine_tuning_notebook.ipynb`**  
-   The Python notebook used for fine-tuning the **Llama-3-8b-instruct** model.
-
-4. **`Embedding_demo.ipynb`**  
-   The Python notebook used to demonstrate
-   the embedding process.
-
-5. **`Extraction_demo.ipynb`**  
-   The Python notebook used to demonstrate
-   the data extraction process.
-
-6. **`llm_connection.ipynb`**  
-   The Python notebook used to demonstrate
-   retrieval and response from the llm.
-
-7. **Gradio App Video**  
-   A video showcasing the working of the Gradio interface for user interactions with the RAG system.
-
-8. **Screenshots**  
-   This folder has the screenshots of the
-   work done to complete this project.
-
-9. **Docker Files**  
-   Docker files to run the project.
-
----
-
-## How to Run
-
-1. Clone the repository.
-2. Build the container using: docker build -t ai_demo_run_1 .
-3. Run the docker compose file.
-4. create a docker network using this command: docker network create my_network
-5. Run mongodb container on this network: docker run -d --name mongodb --network my_network -p 27017:27017 mongo:5.0
-6. Run qdrant container on this network: docker run -d --name qdrant --network my_network -p 6333:6333 qdrant/qdrant:v1.3.0
-7. Run the app container using your clearml credentials:
-   docker run -p 8501:8501 -e CLEARML_API_ACCESS_KEY=YOUR_API_KEY -e CLEARML_API_SECRET_KEY=YOUR_API_SECRET -e CLEARML_API_HOST=YOUR_SERVER_URL ai_demo_run_1
-8. Then open the gradio app on your browser and run the initialize database command to start the etl pipeline, and initialize a qdrant vector database.
-9. Finally you can ask questions to the LLM.
-
----
-
-This repository covers the full RAG workflow, demonstrating the use of modern tools to efficiently retrieve context-aware responses using LLMs.
+## What happens when you click “Initialize Database”
+1. Clone and clean `ros2/ros2_documentation` into MongoDB (`RAG_DB.raw_data`).
+2. Chunk + embed each document with spaCy and upload to Qdrant collection `rag_vectors`.
+3. Subsequent queries embed the question, retrieve the top 5 chunks, build a prompt, and call Llama-3-70B on Together for the final answer.
