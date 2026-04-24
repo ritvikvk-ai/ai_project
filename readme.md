@@ -1,6 +1,6 @@
 # Finetuning ROS2 RAG Assistant
 
-Retrieval-augmented generation (RAG) system built for ROS2, Nav2, MoveIt2, and Gazebo questions. The stack extracts content from the ROS 2 docs repo, stores it in MongoDB, generates spaCy embeddings, indexes them in Qdrant, and routes user queries to Llama-3-70B on Together via a Gradio interface. A fine-tuned Llama-3-8B variant trained on `data.json` is also published on Hugging Face: https://huggingface.co/Data-harjai/ai_project_fine_tuned_llama.
+A transformer-based semantic search and retrieval-augmented generation (RAG) system for ROS2, Nav2, MoveIt2, and Gazebo documentation. The pipeline extracts technical content from the ROS 2 docs repository, stores structured chunks in MongoDB, generates embeddings, indexes them in Qdrant for low-latency vector retrieval, and routes user queries to Llama-3-70B on Together AI through a Gradio interface. The system focuses on domain-specific query understanding, retrieval precision, and interactive technical assistance for robotics developers. A fine-tuned Llama-3-8B variant trained on `data.json` is also published on Hugging Face: https://huggingface.co/Data-harjai/ai_project_fine_tuned_llama.
 
 Project by Ritvik Vasantha Kumar (rv2459) and Ansh Harjai (ah7163).
 
